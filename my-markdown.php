@@ -12,6 +12,10 @@ License: GPL2
 add_filter( 'the_content', 'my_markdown', 7 );
 
 function my_markdown( $content ) {
+    $content = explode( '</pre>', $content );
+    $out = $in = array();
+    foreach ( $content as $c ) list( $out[], $in[] ) = explode( '<pre>', $c );
+    array_pop($in);
     $convert = array(
         '/^\*?\[[^]^]+\]: .*$/m' => '',
 
@@ -51,29 +55,39 @@ function my_markdown( $content ) {
         '/((?:^.*\r?\n: *[^ ].*$(\r?\n)*)+)/m' => "<dl>\n$1\n</dl>",
         '/^(.*)\r?\n: *([^ ].*)$/m' => '<dt>$1</dt><dd>$2</dd>',
     );
-    preg_match_all('/^\[(\d+)\]: ([^ ]+) "([^"]+)"/m', $content, $matches, PREG_SET_ORDER);
+    preg_match_all('/^\[(\d+)\]: ([^ ]+) "([^"]+)"/m', implode("\n", $out), $matches, PREG_SET_ORDER);
     foreach ( $matches as $m ) {
         $convert["/!\[([^\]]+)\]\[{$m[1]}\]/"] = "<img src=\"{$m[2]}\" alt=\"$1\" title=\"{$m[3]}\" />";
         $convert["/\[([^\]]+)\]\[{$m[1]}\]/"] = "<a href=\"{$m[2]}\" title=\"{$m[3]}\">$1</a>";
     }
-    preg_match_all('/^\*\[([^\]]+)\]: ([^\r\n]*)/m', $content, $matches, PREG_SET_ORDER);
+    preg_match_all('/^\*\[([^\]]+)\]: ([^\r\n]*)/m', implode("\n", $out), $matches, PREG_SET_ORDER);
     foreach ( $matches as $m ) {
         $convert["/(?<=\W){$m[1]}(?=\W)/"] = "<abbr title=\"{$m[2]}\">{$m[1]}</abbr>";
     }
-    preg_match_all('/^\[\^(\d+)\]: [^\r\n]*/m', $content, $matches, PREG_SET_ORDER);
-    $num = array();
+    preg_match_all('/^\[\^(\d+)\]: [^\r\n]*/m', implode("\n", $out), $matches, PREG_SET_ORDER);
+    $last = array();
     foreach ( $matches as $m ) {
-        $num[] = $m[1];
+        $hash = get_the_ID() .'-'. $m[1];
+        $convert["/\[\^{$m[1]}\](?!:)/"]
+                = "<sup id=\"ref:{$hash}\"><a rel=\"footnote\" href=\"#fn:{$hash}\">{$m[1]}</a></sup>";
+        $convert["/^\[\^{$m[1]}\]: ([^\\r\\n]*)/sm"] = '';
+        $last[$m[1]] = preg_replace(
+                "/^\[\^{$m[1]}\]: (.*)/",
+                "<li id=\"fn:{$hash}\">$1<a rev=\"footnote\" href=\"#ref:{$hash}\">[Ret]</a></li>",
+                $m[0]
+            );
     }
-    foreach ( $num as $k => $n ) {
-        $i = $k + 1;
-        $hash = get_the_ID() .'-'. $i;
-        $convert["/\[\^{$n}\](?!:)/"]
-                = "<sup id=\"ref:{$hash}\"><a rel=\"footnote\" href=\"#fn:{$hash}\">{$i}</a></sup>";
-        $convert["/^\[\^{$n}\]: ([^\\r\\n]*)(.*)/sm"]
-                = "$2\n<li id=\"fn:{$hash}\">$1<a rev=\"footnote\" href=\"#ref:{$hash}\">[Ret]</a></li>";
+    ksort( $last );
+    $last = implode( "\n", $last );
+    $out = preg_replace( array_keys($convert), array_values($convert), $out);
+    $content = array();
+    foreach ( $in as $n => $i ) {
+        $content[] = array_shift( $out ) .'<pre>'. $i;
     }
-    $convert['/((^<li id="fn:.*)+)/m'] = '<div class="footnotes"><hr /><ol>$1</ol></div>';
-    return preg_replace( array_keys($convert), array_values($convert), $content);
+    $content = implode( '</pre>', $content );
+    if ( !empty( $content ) ) $content .= '</pre>';
+    $content .= array_shift($out);
+    if ( !empty( $last ) ) $content .= "<div class=\"footnotes\"><hr /><ol>{$last}</ol></div>";
+    return $content;
 } // end function my_markdown
 
